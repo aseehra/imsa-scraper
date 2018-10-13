@@ -1,9 +1,11 @@
 from argparse import ArgumentParser
 from datetime import datetime
 import sqlite3
+import sys
 import time
 from threading import Event, Thread
 
+from blessings import Terminal
 import requests
 
 
@@ -21,12 +23,14 @@ class RequestRunner(Thread):
         self.db_file = db_file
         self.tzinfo = datetime.utcnow().astimezone().tzinfo
         self.update_interval = interval
+        self.request_count = 0
 
     def run(self):
         self.db_conn = sqlite3.connect(self.db_file)
         while not self.stop_event.wait(self.update_interval):
             json = self.get_timing_frame()
             self.write_json_to_db(json)
+            self.request_count += 1
         self.db_conn.close()
 
     def get_timing_frame(self):
@@ -57,7 +61,7 @@ def count_rows(db_conn):
     return db_conn.execute("SELECT COUNT(*) FROM requests").fetchone()
 
 
-if __name__ == "__main__":
+def get_arguments():
     parser = ArgumentParser(description="Scrape scoring.imsa.com")
     parser.add_argument("filename", help="Filename to use for sqlite3 database")
     parser.add_argument(
@@ -69,18 +73,40 @@ if __name__ == "__main__":
         action="store_true",
         help="Reinitialize database before beginning",
     )
-    args = parser.parse_args()
+
+    return parser.parse_args()
+
+
+def wait_and_print(runner):
+    term = Terminal()
+    try:
+        while True:
+            with term.location(0, term.height - 1):
+                print(
+                    "Number of requests received: "
+                    + term.green
+                    + f"{runner.request_count}", end=""
+                )
+                sys.stdout.flush()
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print(term.red + "Shutting down")
+        runner.stop_event.set()
+        runner.join()
+
+
+if __name__ == "__main__":
+    args = get_arguments()
 
     db_conn = sqlite3.connect(args.filename)
 
-    if (args.clean):
+    if args.clean:
         drop_tables(db_conn)
 
     create_tables(db_conn)
 
     runner = RequestRunner(args.filename, args.interval)
     runner.start()
-    time.sleep(20)
-    runner.stop_event.set()
-    time.sleep(6)
+    wait_and_print(runner)
+
     db_conn.close()
