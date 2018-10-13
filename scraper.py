@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 from datetime import datetime
 import sqlite3
 import time
@@ -7,7 +8,7 @@ import requests
 
 
 class RequestRunner(Thread):
-    def __init__(self, db_file):
+    def __init__(self, db_file, interval):
         Thread.__init__(self)
         self.stop_event = Event()
         self.session = requests.Session()
@@ -19,10 +20,11 @@ class RequestRunner(Thread):
         )
         self.db_file = db_file
         self.tzinfo = datetime.utcnow().astimezone().tzinfo
+        self.update_interval = interval
 
     def run(self):
         self.db_conn = sqlite3.connect(self.db_file)
-        while not self.stop_event.wait(5):
+        while not self.stop_event.wait(self.update_interval):
             json = self.get_timing_frame()
             self.write_json_to_db(json)
         self.db_conn.close()
@@ -39,10 +41,16 @@ class RequestRunner(Thread):
             )
 
 
-def set_up_tables(db_conn):
+def drop_tables(db_conn):
     with db_conn:
         db_conn.execute("DROP TABLE IF EXISTS requests")
-        db_conn.execute("CREATE TABLE requests (timestamp TEXT, json TEXT)")
+
+
+def create_tables(db_conn):
+    with db_conn:
+        db_conn.execute(
+            "CREATE TABLE IF NOT EXISTS requests (timestamp TEXT, json TEXT)"
+        )
 
 
 def count_rows(db_conn):
@@ -50,15 +58,29 @@ def count_rows(db_conn):
 
 
 if __name__ == "__main__":
-    conn = sqlite3.connect("imsa-plm.db")
-    set_up_tables(conn)
+    parser = ArgumentParser(description="Scrape scoring.imsa.com")
+    parser.add_argument("filename", help="Filename to use for sqlite3 database")
+    parser.add_argument(
+        "-i", "--interval", help="Polling interval, in seconds", default=5, type=int
+    )
+    parser.add_argument(
+        "-c",
+        "--clean",
+        action="store_true",
+        help="Reinitialize database before beginning",
+    )
+    args = parser.parse_args()
 
-    runner = RequestRunner("imsa-plm.db")
+    db_conn = sqlite3.connect(args.filename)
+
+    if (args.clean):
+        drop_tables(db_conn)
+
+    create_tables(db_conn)
+
+    runner = RequestRunner(args.filename, args.interval)
     runner.start()
     time.sleep(20)
     runner.stop_event.set()
     time.sleep(6)
-
-    print(count_rows(conn))
-
-    conn.close()
+    db_conn.close()
