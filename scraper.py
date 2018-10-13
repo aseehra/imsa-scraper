@@ -83,14 +83,17 @@ def wait_and_print(runner):
         while True:
             with term.location(0, term.height - 1):
                 print(
-                    "Number of requests received: "
+                    term.yellow
+                    + "Number of requests received: "
                     + term.green
-                    + f"{runner.request_count}", end=""
+                    + f"{runner.request_count}"
+                    + term.clear_eol,
+                    end="",
                 )
                 sys.stdout.flush()
             time.sleep(1)
     except KeyboardInterrupt:
-        print(term.red + "Shutting down")
+        print(term.clear_eol + term.red + "Shutting down")
         runner.stop_event.set()
         runner.join()
 
