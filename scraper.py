@@ -28,20 +28,26 @@ class RequestRunner(Thread):
     def run(self):
         self.db_conn = sqlite3.connect(self.db_file)
         while not self.stop_event.wait(self.update_interval):
-            json = self.get_timing_frame()
-            self.write_json_to_db(json)
+            timing_frame = self.get_timing_frame()
+            self.write_json_to_db(timing_frame)
             self.request_count += 1
         self.db_conn.close()
 
     def get_timing_frame(self):
-        res = self.session.get("https://api.imsa.com/live-scoring-plus/v1/results.json")
-        return res.text
+        standings = self.session.get(
+            "https://scoring.imsa.com/scoring_data/RaceResults_JSONP.json"
+        )
+        race_data = self.session.get(
+            "https://scoring.imsa.com/scoring_data/SessionInfo_JSONP.json"
+        )
+        return {"standings": standings.text[17:-2], "race_data": race_data.text[17:-2]}
 
-    def write_json_to_db(self, json):
+    def write_json_to_db(self, timing_frame):
         with self.db_conn:
             timestamp = datetime.now(self.tzinfo).isoformat(timespec="seconds")
             self.db_conn.execute(
-                "INSERT INTO requests VALUES (?, ?)", (timestamp, json)
+                "INSERT INTO requests VALUES (?, ?, ?)",
+                (timestamp, timing_frame["standings"], timing_frame["race_data"]),
             )
 
 
@@ -53,7 +59,8 @@ def drop_tables(db_conn):
 def create_tables(db_conn):
     with db_conn:
         db_conn.execute(
-            "CREATE TABLE IF NOT EXISTS requests (timestamp TEXT, json TEXT)"
+            "CREATE TABLE IF NOT EXISTS requests "
+            + "(timestamp TEXT, standings TEXT, raceData TEXT)"
         )
 
 
